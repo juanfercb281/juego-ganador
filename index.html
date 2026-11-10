@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cazabugs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+/* ==========================================================================
+   1. TOKENS DE DISEÑO
+   Paleta, tipografía y colores de sintaxis en un solo lugar.
+   ========================================================================== */
+:root {
+  --bg: #0d1020;
+  --panel: #151933;
+  --panel-2: #10132a;
+  --line: #262c52;
+  --ink: #e9ecff;
+  --muted: #8b93bd;
+  --accent: #7c8cff;
+  --ok: #5eead4;
+  --bad: #ff6b81;
+  --warn: #ffc15e;
+  --violet: #c792ea;
+  --ui: "Sora", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+/* ==========================================================================
+   2. BASE Y FONDO
+   El fondo es estático (cuadrícula de puntos + dos halos): no cuesta rendimiento.
+   ========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 400 14px/1.5 var(--ui);
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(900px 500px at 10% -10%, rgba(124,140,255,.16), transparent 60%),
+    radial-gradient(800px 500px at 100% 110%, rgba(94,234,212,.09), transparent 60%),
+    radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px) 0 0 / 26px 26px,
+    var(--bg);
+  background-attachment: fixed;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.app { max-width: 1120px; margin: 0 auto; padding: 22px 20px 40px; }
+
+/* ==========================================================================
+   3. HUD
+   ========================================================================== */
+.hud {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding: 12px 18px;
+  background: rgba(21,25,51,.7);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  position: relative;
+  margin-bottom: 26px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+.logo {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), var(--violet));
+  font: 500 13px var(--mono); color: #0d1020;
+}
+.stats { display: flex; align-items: center; gap: 26px; }
+.stat { display: flex; flex-direction: column; line-height: 1.2; }
+.stat span { font-size: 11px; color: var(--muted); }
+.stat b { font: 500 19px/1.35 var(--mono); font-variant-numeric: tabular-nums; }
+.stat.hot b { color: var(--warn); }
+.lives { display: flex; gap: 6px; }
+.life {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--bad); box-shadow: 0 0 10px rgba(255,107,129,.6);
+  transition: opacity .25s, box-shadow .25s;
+}
+.life.lost { opacity: .15; box-shadow: none; }
+/* Barra de avance hacia el siguiente nivel (pegada al borde inferior del HUD) */
+.progress { position: absolute; left: 18px; right: 18px; bottom: -1px; height: 2px; background: transparent; }
+.progress i {
+  display: block; height: 100%; transform-origin: left;
+  background: linear-gradient(90deg, var(--accent), var(--ok));
+  transition: transform .4s ease;
+}
+
+/* ==========================================================================
+   4. ÁREA DE JUEGO (3 ranuras fijas: las tarjetas no se desplazan)
+   ========================================================================== */
+.playfield { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .playfield { grid-template-columns: 1fr; } }
+
+/* ==========================================================================
+   5. TARJETA = VENTANA DE EDITOR
+   ========================================================================== */
+.card {
+  position: relative; overflow: hidden;
+  background: linear-gradient(180deg, #181d3b, var(--panel-2));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.38);
+  transition: border-color .2s, box-shadow .2s;
+  animation: enter .22s ease-out;
+}
+.card.urgent { border-color: rgba(255,107,129,.55); box-shadow: 0 14px 34px rgba(0,0,0,.38), 0 0 24px rgba(255,107,129,.18); }
+.card.solved { border-color: rgba(94,234,212,.5); }
+.card.failed { border-color: var(--bad); }
+.card.shake { animation: shake .26s; }
+
+.timer { height: 3px; background: rgba(255,255,255,.06); }
+.timer i {
+  display: block; height: 100%; transform-origin: left; will-change: transform;
+  background: linear-gradient(90deg, var(--accent), var(--ok));
+  box-shadow: 0 0 10px rgba(124,140,255,.7);
+}
+.card.urgent .timer i { background: var(--bad); box-shadow: 0 0 10px rgba(255,107,129,.8); }
+
+.card-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+.dots { display: flex; gap: 6px; }
+.dots i { width: 9px; height: 9px; border-radius: 50%; background: #2c3260; }
+.file { font: 400 12px var(--mono); color: var(--muted); }
+.status { margin-left: auto; font-size: 12px; color: var(--muted); }
+.chip { padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 600; }
+.chip.sintaxis { color: var(--warn); background: rgba(255,193,94,.12); }
+.chip.logica { color: var(--violet); background: rgba(199,146,234,.13); }
+.card.solved .status { color: var(--ok); font-weight: 600; }
+
+.code { list-style: none; margin: 0; padding: 8px 0; }
+.line {
+  display: grid; grid-template-columns: 34px 1fr; width: 100%;
+  padding: 5px 14px 5px 11px;
+  border: 0; border-left: 3px solid transparent; background: transparent;
+  text-align: left; font: 400 13px/1.55 var(--mono); transition: background .12s;
+}
+.line .ln { color: #4b5380; user-select: none; }
+.line code { font: inherit; white-space: pre-wrap; word-break: break-word; }
+.line:hover:not(:disabled) { background: rgba(124,140,255,.1); }
+.line:disabled { cursor: default; }
+.line.picked { background: rgba(124,140,255,.16); border-left-color: var(--accent); }
+.line.wrong { background: rgba(255,107,129,.1); border-left-color: var(--bad); opacity: .55; }
+.line.ok { background: rgba(94,234,212,.1); border-left-color: var(--ok); }
+.line.bug { background: rgba(255,107,129,.13); border-left-color: var(--bad); }
+
+/* Colores de sintaxis */
+.tk-k { color: var(--violet); }
+.tk-s { color: #9be3b8; }
+.tk-n { color: var(--warn); }
+.tk-f { color: #82aaff; }
+
+.fixes { padding: 4px 14px 14px; display: grid; gap: 7px; }
+.fixes p { margin: 2px 0 2px; font-size: 12px; color: var(--muted); }
+.fix {
+  padding: 8px 11px; text-align: left; white-space: pre-wrap; word-break: break-word;
+  font: 400 12.5px/1.45 var(--mono);
+  background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 9px;
+  transition: border-color .15s, background .15s;
+}
+.fix:hover:not(:disabled) { border-color: var(--accent); background: rgba(124,140,255,.12); }
+.fix:disabled { cursor: default; }
+.fix.wrong { border-color: var(--bad); background: rgba(255,107,129,.1); opacity: .55; }
+
+.note { margin: 0; padding: 11px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+
+/* Puntos flotantes al acertar */
+.pop {
+  position: absolute; top: 44px; right: 16px; pointer-events: none;
+  font: 600 18px var(--mono); color: var(--ok);
+  animation: pop .9s ease-out forwards;
+}
+
+/* Destello rojo en los bordes al perder una vida */
+.flash { position: fixed; inset: 0; z-index: 5; pointer-events: none; box-shadow: inset 0 0 140px rgba(255,107,129,.55); opacity: 0; }
+.flash.on { animation: flash .6s ease-out; }
+
+/* Tarjeta bonus (dorada), botones de ayuda, aviso central, chispas y tabla */
+.status { display: flex; align-items: center; gap: 6px; }
+.chip.gold { color: #1a1405; background: var(--warn); }
+.card.golden { border-color: rgba(255,193,94,.55); box-shadow: 0 14px 34px rgba(0,0,0,.38), 0 0 26px rgba(255,193,94,.18); }
+.card.golden .timer i { background: linear-gradient(90deg, var(--warn), #ff9f43); box-shadow: 0 0 10px rgba(255,193,94,.8); }
+.card.golden.urgent { border-color: rgba(255,107,129,.55); }
+.card.golden.urgent .timer i { background: var(--bad); }
+.card.golden.solved { border-color: rgba(94,234,212,.5); }
+.card.golden.failed { border-color: var(--bad); }
+.fix::before { content: attr(data-key); margin-right: 10px; color: var(--muted); }
+.tools { display: flex; gap: 8px; }
+.ghost { padding: 6px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); font-size: 12px; transition: color .15s, border-color .15s; }
+.ghost:hover { color: var(--ink); border-color: var(--accent); }
+.banner {
+  position: fixed; top: 96px; left: 50%; z-index: 6; opacity: 0; pointer-events: none;
+  padding: 10px 26px; border-radius: 999px; font-weight: 600; font-size: 20px;
+  background: rgba(21,25,51,.92); border: 1px solid var(--accent); box-shadow: 0 10px 40px rgba(124,140,255,.35);
+}
+.banner.on { animation: banner 1.4s ease-out; }
+.spark { position: absolute; left: 50%; top: 45%; width: 5px; height: 5px; border-radius: 50%; background: var(--ok); pointer-events: none; animation: spark .6s ease-out forwards; }
+.golden .spark { background: var(--warn); }
+.overlay { overflow-y: auto; }
+.name { width: 100%; margin-bottom: 18px; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.03); color: var(--ink); font: inherit; text-align: center; }
+.name:focus { outline: none; border-color: var(--accent); }
+.board { list-style: none; margin: 0 0 22px; padding: 0; text-align: left; font-size: 13px; }
+.board li { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; padding: 8px 12px; border-radius: 10px; color: var(--muted); }
+.board li.me { background: rgba(124,140,255,.16); color: var(--ink); }
+.board li.empty { display: block; text-align: center; }
+.board b { font: 500 13px var(--mono); color: var(--ink); }
+.pos { font-family: var(--mono); }
+@keyframes banner { 0% { opacity: 0; transform: translate(-50%, -12px); } 15%, 75% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; } }
+@keyframes spark { to { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+
+/* ==========================================================================
+   6. PANTALLAS DE INICIO Y FIN
+   ========================================================================== */
+.overlay {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: rgba(10,12,28,.8); backdrop-filter: blur(10px);
+}
+.overlay[hidden] { display: none; }
+.panel {
+  width: 100%; max-width: 460px; padding: 38px 34px; text-align: center;
+  background: linear-gradient(180deg, #181d3b, var(--panel-2));
+  border: 1px solid var(--line); border-radius: 20px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.5);
+}
+.panel .logo { width: 48px; height: 48px; font-size: 18px; border-radius: 14px; margin: 0 auto 18px; }
+.panel h1 { margin: 0 0 10px; font-size: 38px; font-weight: 700; letter-spacing: -.03em; }
+.panel p { margin: 0 0 22px; color: var(--muted); }
+.legend { display: flex; justify-content: center; gap: 8px; margin-bottom: 26px; }
+.score-big { font: 500 52px/1.1 var(--mono); margin-bottom: 4px; }
+.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 26px; }
+.summary div { padding: 10px 0; border: 1px solid var(--line); border-radius: 12px; }
+.summary b { display: block; font: 500 20px var(--mono); }
+.summary span { font-size: 11px; color: var(--muted); }
+.btn {
+  padding: 13px 34px; border: 0; border-radius: 12px; font-weight: 600; color: #0d1020;
+  background: linear-gradient(135deg, var(--accent), #9fb0ff);
+  box-shadow: 0 8px 24px rgba(124,140,255,.35);
+  transition: transform .12s, box-shadow .12s;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(124,140,255,.45); }
+
+/* ==========================================================================
+   7. ANIMACIONES (se anulan con prefers-reduced-motion)
+   ========================================================================== */
+@keyframes enter { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+@keyframes shake { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+@keyframes pop { to { transform: translateY(-30px); opacity: 0; } }
+@keyframes flash { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+
+<body>
+<main class="app">
+  <header class="hud">
+    <div class="brand"><span class="logo">{ }</span>Cazabugs</div>
+    <div class="stats">
+      <div class="stat"><span>Puntos</span><b id="score">0</b></div>
+      <div class="stat" id="comboBox"><span>Combo</span><b id="combo">x1</b></div>
+      <div class="stat"><span>Nivel</span><b id="level">1</b></div>
+      <div class="lives" id="lives" aria-label="Vidas"></div>
+      <div class="tools">
+        <button class="ghost" id="pauseBtn" type="button">Pausa</button>
+        <button class="ghost" id="soundBtn" type="button">Sonido: sí</button>
+      </div>
+    </div>
+    <div class="progress"><i id="progress"></i></div>
+  </header>
+
+  <section class="playfield" id="playfield" aria-live="polite"></section>
+</main>
+
+<div class="flash" id="flash"></div>
+<div class="banner" id="banner"></div>
+<div class="overlay" id="overlay"><div class="panel" id="panel"></div></div>
+
+<script>
+'use strict';
+
+/* ==========================================================================
+   1. CONFIGURACIÓN
+   Constantes centralizadas y congeladas: ajustar la dificultad no obliga
+   a tocar la lógica.
+   ========================================================================== */
+const CONFIG = Object.freeze({
+  startLives: 3,
+  maxCombo: 8,            // tope del multiplicador
+  penaltyMs: 2000,        // tiempo que se pierde al equivocarse
+  solvesPerLevel: 4,      // aciertos para subir de nivel
+  baseDuration: 14000,    // vida de una tarjeta en el nivel 1 (ms)
+  minDuration: 6500,
+  durationStep: 800,      // cuánto se acorta por nivel
+  baseSpawnGap: 3800,     // tiempo entre tarjetas en el nivel 1 (ms)
+  minSpawnGap: 1600,
+  spawnStep: 250,
+  closeDelay: 1400,       // cuánto se ve la tarjeta ya resuelta
+  slots: 3,
+  storageKey: 'cazabugs-best',
+  boardKey: 'cazabugs-board',
+  nameKey: 'cazabugs-name',
+  boardSize: 5,           // puestos de la tabla de posiciones
+  goldenChance: 0.14,     // probabilidad de tarjeta bonus (desde el nivel 2)
+  goldenFactor: 3,        // multiplicador de puntos de la tarjeta bonus
+  goldenTime: 0.65,       // la tarjeta bonus dura menos
+  lifeAtCombo: 5          // combo que devuelve una vida
+});
+
+/* Etiquetas visibles y clase CSS de cada tipo de error */
+const TYPES = Object.freeze({
+  sintaxis: { label: 'Error de sintaxis', cls: 'sintaxis' },
+  lógica:   { label: 'Error de lógica',   cls: 'logica' }
+});
+
+/* ==========================================================================
+   2. DATOS: banco de fragmentos
+   code -> líneas | bug -> índice de la línea con error | fix -> corrección
+   wrong -> distractores | why -> explicación que se muestra al terminar
+   ========================================================================== */
+const SNIPPETS = [
+  { lang: 'JavaScript', type: 'sintaxis',
+    code: ['function suma(a, b) {', '  return a + b;', '}', 'console.log(suma(2, 3);'],
+    bug: 3, fix: 'console.log(suma(2, 3));',
+    wrong: ['console.log(suma(2, 3)', 'console.log(suma(2; 3));'],
+    why: 'Falta cerrar el paréntesis de console.log.' },
+
+  { lang: 'JavaScript', type: 'lógica',
+    code: ['const nums = [4, 8, 15, 16];', 'let total = 0;', 'for (let i = 0; i <= nums.length; i++) {', '  total += nums[i];', '}'],
+    bug: 2, fix: 'for (let i = 0; i < nums.length; i++) {',
+    wrong: ['for (let i = 0; i < nums.length - 1; i++) {', 'for (let i = 1; i <= nums.length; i++) {'],
+    why: 'Con <= se lee nums[4], que no existe (undefined).' },
+
+  { lang: 'Python', type: 'sintaxis',
+    code: ['def es_par(n):', '    if n % 2 = 0:', '        return True', '    return False'],
+    bug: 1, fix: '    if n % 2 == 0:',
+    wrong: ['    if n % 2 === 0:', '    if n % 2 => 0:'],
+    why: '= asigna; para comparar se usa ==.' },
+
+  { lang: 'Python', type: 'lógica',
+    code: ['def factorial(n):', '    if n == 0:', '        return 0', '    return n * factorial(n - 1)'],
+    bug: 2, fix: '        return 1',
+    wrong: ['        return n', '        return -1'],
+    why: 'El caso base del factorial es 1; con 0 todo el producto da 0.' },
+
+  { lang: 'JavaScript', type: 'sintaxis',
+    code: ['const usuario = {', '  nombre: "Ana",', '  edad: 20', '  activo: true', '};'],
+    bug: 2, fix: '  edad: 20,',
+    wrong: ['  edad: 20;', '  edad = 20,'],
+    why: 'Las propiedades de un objeto se separan con coma.' },
+
+  { lang: 'JavaScript', type: 'lógica',
+    code: ['function categoria(edad) {', '  if (edad > 18) {', '    return "Adulto";', '  }', '  return "Menor";', '}'],
+    bug: 1, fix: '  if (edad >= 18) {',
+    wrong: ['  if (edad <= 18) {', '  if (edad < 18) {'],
+    why: 'Quien tiene exactamente 18 años también es adulto: falta el >=.' },
+
+  { lang: 'Python', type: 'sintaxis',
+    code: ['nombres = ["Ana", "Luis"]', 'for n in nombres', '    print(n)'],
+    bug: 1, fix: 'for n in nombres:',
+    wrong: ['for n in nombres;', 'for (n in nombres):'],
+    why: 'Los bloques for de Python terminan en dos puntos.' },
+
+  { lang: 'Python', type: 'lógica',
+    code: ['maximo = lista[0]', 'for x in lista:', '    if x < maximo:', '        maximo = x'],
+    bug: 2, fix: '    if x > maximo:',
+    wrong: ['    if x == maximo:', '    if x <= 0:'],
+    why: 'Con < se está calculando el mínimo, no el máximo.' },
+
+  { lang: 'JavaScript', type: 'lógica',
+    code: ['const a = 5;', 'const b = 5;', 'if (a = b) {', '  console.log("iguales");', '}'],
+    bug: 2, fix: 'if (a === b) {',
+    wrong: ['if (a == b {', 'if (a =! b) {'],
+    why: 'a = b asigna (siempre es verdadero); comparar requiere ===.' },
+
+  { lang: 'JavaScript', type: 'sintaxis',
+    code: ['const dobles = [1, 2, 3].map(n => {', '  return n * 2;', '};', 'console.log(dobles);'],
+    bug: 2, fix: '});',
+    wrong: ['}];', ')};'],
+    why: 'El callback de map se cierra con } y luego el paréntesis.' },
+
+  { lang: 'JavaScript', type: 'lógica',
+    code: ['const precios = [10, 20, 30];', 'const total = precios.reduce((acc, p) => acc + p, 0);', 'const promedio = total * precios.length;'],
+    bug: 2, fix: 'const promedio = total / precios.length;',
+    wrong: ['const promedio = total - precios.length;', 'const promedio = total + precios.length;'],
+    why: 'El promedio es la suma dividida entre la cantidad de elementos.' },
+
+  { lang: 'Python', type: 'sintaxis',
+    code: ['def saludar(nombre):', 'print("Hola " + nombre)', 'saludar("Fer")'],
+    bug: 1, fix: '    print("Hola " + nombre)',
+    wrong: ['    print("Hola " + nombre', '    print "Hola " + nombre'],
+    why: 'El cuerpo de la función debe ir indentado.' },
+
+  { lang: 'Python', type: 'sintaxis',
+    code: ['def cuadrado(x):', '    return x ** 2', 'print(cuadrado(4)'],
+    bug: 2, fix: 'print(cuadrado(4))',
+    wrong: ['print(cuadrado(4]))', 'print cuadrado(4)'],
+    why: 'Falta el paréntesis de cierre de print.' },
+
+  { lang: 'JavaScript', type: 'lógica',
+    code: ['function contiene(arr, x) {', '  for (const v of arr) {', '    if (v === x) return false;', '  }', '  return false;', '}'],
+    bug: 2, fix: '    if (v === x) return true;',
+    wrong: ['    if (v !== x) return true;', '    if (v === x) break;'],
+    why: 'Al encontrar el valor se debe devolver true, no false.' },
+
+  { lang: 'Python', type: 'lógica',
+    code: ['def contar_pares(lista):', '    c = 0', '    for n in lista:', '        if n % 2 == 1:', '            c += 1', '    return c'],
+    bug: 3, fix: '        if n % 2 == 0:',
+    wrong: ['        if n % 2 == 2:', '        if n // 2 == 0:'],
+    why: 'Con == 1 se cuentan los impares.' },
+
+  { lang: 'JavaScript', type: 'sintaxis',
+    code: ['const nombres = ["Ana", "Luis"];', 'nombres.forEach(n => {', '  console.log("Hola " + n);', '}'],
+    bug: 3, fix: '});',
+    wrong: ['}));', '};'],
+    why: 'forEach es una llamada a función: hay que cerrarla con });' },
+
+  { lang: 'JavaScript', type: 'lógica',
+    code: ['let suma = 0;', 'for (let i = 1; i <= 10; i++) {', '  suma = i;', '}', 'console.log(suma);'],
+    bug: 2, fix: '  suma += i;',
+    wrong: ['  suma =+ i;', '  suma + i;'],
+    why: 'Con = se sobrescribe la suma en cada vuelta; hay que acumular con +=.' },
+
+  { lang: 'Python', type: 'sintaxis',
+    code: ['edad = int(input("Edad: "))', 'if edad >= 18:', '    print("Mayor")', 'else', '    print("Menor")'],
+    bug: 3, fix: 'else:',
+    wrong: ['else;', 'else if:'],
+    why: 'else también termina en dos puntos.' },
+
+  { lang: 'Python', type: 'lógica',
+    code: ['def invertir(texto):', '    return texto[1:]', 'print(invertir("hola"))'],
+    bug: 1, fix: '    return texto[::-1]',
+    wrong: ['    return texto[-1]', '    return texto[0:-1]'],
+    why: '[::-1] recorre la cadena al revés; [1:] solo quita la primera letra.' },
+
+  { lang: 'JavaScript', type: 'sintaxis',
+    code: ['const esPar = (n) => {', '  return n % 2 === 0;', '}', 'console.log(esPar(4)));'],
+    bug: 3, fix: 'console.log(esPar(4));',
+    wrong: ['console.log(esPar(4);', 'console.log(esPar 4);'],
+    why: 'Sobra un paréntesis de cierre.' }
+];
+
+/* ==========================================================================
+   3. UTILIDADES
+   ========================================================================== */
+
+/** Crea un elemento. Usa textContent (nunca innerHTML) para evitar inyección. */
+const el = (tag, className, text) => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+/** Copia mezclada del arreglo (Fisher-Yates, O(n)). */
+const shuffle = (arr) => {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+/** Récord persistente; localStorage puede fallar (modo privado), de ahí el try/catch. */
+const storage = {
+  get() { try { return Number(localStorage.getItem(CONFIG.storageKey)) || 0; } catch { return 0; } },
+  set(v) { try { localStorage.setItem(CONFIG.storageKey, String(v)); } catch { /* sin persistencia */ } }
+};
+
+/** Nombre del jugador y tabla de posiciones local (top N ordenado por puntaje). */
+const profile = {
+  get() { try { return localStorage.getItem(CONFIG.nameKey) || ''; } catch { return ''; } },
+  set(v) { try { localStorage.setItem(CONFIG.nameKey, v); } catch { /* sin persistencia */ } }
+};
+const board = {
+  get() { try { return JSON.parse(localStorage.getItem(CONFIG.boardKey)) || []; } catch { return []; } },
+  add(entry) {
+    const list = [...this.get(), entry].sort((a, b) => b.score - a.score).slice(0, CONFIG.boardSize);
+    try { localStorage.setItem(CONFIG.boardKey, JSON.stringify(list)); } catch { /* sin persistencia */ }
+    return { list, index: list.indexOf(entry) };   // index = -1 si no entró al top
+  }
+};
+
+/**
+ * Efectos de sonido sintetizados con Web Audio (sin archivos externos).
+ * El AudioContext se crea de forma perezosa, tras el primer clic del usuario.
+ */
+const sfx = (() => {
+  let ctx = null, muted = false;
+  const tone = (freq, dur, type = 'sine', vol = 0.05, delay = 0) => {
+    if (muted) return;
+    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    const t = ctx.currentTime + delay, osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = type; osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t); osc.stop(t + dur);
+  };
+  return {
+    ok()  { tone(660, 0.09); tone(880, 0.12, 'sine', 0.05, 0.08); },
+    bad() { tone(190, 0.18, 'sawtooth', 0.04); },
+    hit() { tone(110, 0.35, 'square', 0.05); },
+    up()  { [523, 659, 784].forEach((f, i) => tone(f, 0.14, 'triangle', 0.05, i * 0.09)); },
+    toggle() { muted = !muted; return muted; }
+  };
+})();
+
+/**
+ * Resaltador de sintaxis mínimo (cadenas, números, palabras clave, funciones).
+ * Una sola pasada con regex; construye nodos con DOM, no con HTML.
+ */
+const KEYWORDS = /^(function|return|const|let|var|if|else|elif|for|while|in|of|def|import|from|class|new|null|true|false|True|False|None|and|or|not|print|console|break)$/;
+function highlight(target, text) {
+  target.replaceChildren();
+  const re = /("[^"]*"|'[^']*'|`[^`]*`)|(\b\d+\b)|(\b[A-Za-z_]\w*\b)|([^\w"'`]+|.)/g;
+  let m;
+  while ((m = re.exec(text))) {
+    let cls = '';
+    if (m[1]) cls = 'tk-s';
+    else if (m[2]) cls = 'tk-n';
+    else if (m[3]) cls = KEYWORDS.test(m[3]) ? 'tk-k' : (text[re.lastIndex] === '(' ? 'tk-f' : '');
+    if (cls) target.appendChild(el('span', cls, m[0]));
+    else target.append(m[0]);
+  }
+}
+
+/* ==========================================================================
+   4. ESTADO Y REFERENCIAS AL DOM
+   ========================================================================== */
+const state = {
+  running: false, paused: false, player: 'Jugador',
+  score: 0, lives: CONFIG.startLives, level: 1,
+  solved: 0, combo: 0, maxCombo: 0,
+  best: storage.get(),
+  spawnIn: 0,          // ms que faltan para la siguiente tarjeta
+  lastTs: 0,           // marca de tiempo del frame anterior
+  nextId: 0,
+  deck: [],            // baraja de fragmentos pendientes
+  cards: new Map()     // id -> tarjeta activa
+};
+
+const $ = (id) => document.getElementById(id);
+const dom = {
+  score: $('score'), combo: $('combo'), comboBox: $('comboBox'), level: $('level'),
+  lives: $('lives'), progress: $('progress'), field: $('playfield'),
+  overlay: $('overlay'), panel: $('panel'), flash: $('flash'), banner: $('banner'),
+  pauseBtn: $('pauseBtn'), soundBtn: $('soundBtn'), slots: []
+};
+
+/* ==========================================================================
+   5. DIFICULTAD (funciones puras que dependen solo del nivel)
+   ========================================================================== */
+const cardDuration = () => Math.max(CONFIG.minDuration, CONFIG.baseDuration - (state.level - 1) * CONFIG.durationStep);
+const spawnGap     = () => Math.max(CONFIG.minSpawnGap, CONFIG.baseSpawnGap - (state.level - 1) * CONFIG.spawnStep);
+const maxCards     = () => (state.level >= 3 ? 3 : 2);
+
+/* ==========================================================================
+   6. HUD
+   ========================================================================== */
+function updateHud() {
+  dom.score.textContent = state.score;
+  dom.combo.textContent = 'x' + (1 + state.combo * 0.25);
+  dom.comboBox.classList.toggle('hot', state.combo > 0);
+  dom.level.textContent = state.level;
+  dom.progress.style.transform = 'scaleX(' + (state.solved % CONFIG.solvesPerLevel) / CONFIG.solvesPerLevel + ')';
+  [...dom.lives.children].forEach((dot, i) => dot.classList.toggle('lost', i >= state.lives));
+}
+
+/* ==========================================================================
+   7. CICLO DE JUEGO
+   Un solo requestAnimationFrame para todas las tarjetas (en vez de un
+   temporizador por tarjeta). El delta se limita a 100 ms: si la pestaña
+   pasa a segundo plano el juego se pausa y no castiga al jugador.
+   ========================================================================== */
+function frame(ts) {
+  if (!state.running || state.paused) return;
+
+  const dt = Math.min(ts - state.lastTs, 100);
+  state.lastTs = ts;
+
+  // Aparición de nuevas tarjetas
+  state.spawnIn -= dt;
+  if (state.spawnIn <= 0 && state.cards.size < maxCards()) {
+    spawnCard();
+    state.spawnIn = spawnGap();
+  }
+
+  // Temporizadores: solo se anima transform (sin reflow)
+  for (const card of state.cards.values()) {
+    if (card.stage === 'done') continue;
+    card.remaining -= dt;
+    const ratio = Math.max(card.remaining / card.duration, 0);
+    card.bar.style.transform = 'scaleX(' + ratio + ')';
+    card.el.classList.toggle('urgent', ratio < 0.3);
+    if (card.remaining <= 0) expireCard(card);
+  }
+  requestAnimationFrame(frame);
+}
+
+/** Siguiente fragmento de la baraja; al agotarse se vuelve a mezclar (sin repetidos seguidos). */
+function nextSnippet() {
+  if (!state.deck.length) state.deck = shuffle(SNIPPETS);
+  return state.deck.pop();
+}
+
+/* ==========================================================================
+   8. TARJETAS
+   ========================================================================== */
+function spawnCard() {
+  const free = dom.slots.filter((s) => !s.firstChild);
+  if (!free.length) return;
+  const slot = free[Math.floor(Math.random() * free.length)];
+  const snippet = nextSnippet();
+
+  // Desde el nivel 2 pueden salir tarjetas bonus: duran menos pero valen x3
+  const golden = state.level >= 2 && Math.random() < CONFIG.goldenChance;
+  const time = cardDuration() * (golden ? CONFIG.goldenTime : 1);
+
+  const card = {
+    id: state.nextId++, snippet, golden,
+    stage: 'find',                       // find -> fix -> done
+    duration: time, remaining: time,
+    el: el('article', 'card'), lines: [], fixes: null
+  };
+  if (golden) card.el.classList.add('golden');
+
+  // Barra de tiempo
+  const timer = el('div', 'timer');
+  card.bar = el('i');
+  timer.appendChild(card.bar);
+
+  // Encabezado con aspecto de ventana de editor
+  const dots = el('div', 'dots');
+  dots.append(el('i'), el('i'), el('i'));
+  const head = el('div', 'card-head');
+  card.status = el('span', 'status');
+  if (golden) card.status.appendChild(el('span', 'chip gold', 'Bonus x' + CONFIG.goldenFactor));
+  else card.status.textContent = 'Encuentra el error';
+  head.append(dots, el('span', 'file', snippet.lang === 'Python' ? 'script.py' : 'main.js'), card.status);
+
+  // Cada línea es un botón: accesible con teclado
+  const list = el('ol', 'code');
+  snippet.code.forEach((text, i) => {
+    const li = el('li');
+    const btn = el('button', 'line');
+    const code = el('code');
+    btn.type = 'button';
+    btn.dataset.index = i;
+    highlight(code, text);
+    btn.append(el('span', 'ln', i + 1), code);
+    li.appendChild(btn);
+    list.appendChild(li);
+    card.lines.push(btn);
+  });
+
+  card.el.dataset.id = card.id;
+  card.el.append(timer, head, list);
+  slot.appendChild(card.el);
+  state.cards.set(card.id, card);
+}
+
+/** Muestra el tipo de error como etiqueta de color en el encabezado. */
+function setChip(card) {
+  const t = TYPES[card.snippet.type];
+  card.status.replaceChildren(el('span', 'chip ' + t.cls, t.label));
+  if (card.golden) card.status.appendChild(el('span', 'chip gold', 'x' + CONFIG.goldenFactor));
+}
+
+/** Opciones de corrección mezcladas; la correcta se marca con data-ok. */
+function showFixes(card) {
+  const box = el('div', 'fixes');
+  box.appendChild(el('p', '', 'Elige la corrección'));
+  shuffle([card.snippet.fix, ...card.snippet.wrong]).forEach((text, i) => {
+    const btn = el('button', 'fix');
+    btn.dataset.key = i + 1;           // atajo de teclado 1-3
+    btn.type = 'button';
+    if (text === card.snippet.fix) btn.dataset.ok = '1';
+    highlight(btn, text);
+    box.appendChild(btn);
+  });
+  card.fixes = box;
+  card.el.appendChild(box);
+}
+
+/** Cierra la tarjeta: bloquea la interacción y la retira tras un instante. */
+function finishCard(card, className) {
+  card.stage = 'done';
+  card.el.classList.remove('urgent');
+  card.el.classList.add(className);
+  card.lines.forEach((b) => (b.disabled = true));
+  if (card.fixes) card.fixes.remove();
+  card.el.appendChild(el('p', 'note', card.snippet.why));
+  setTimeout(() => { card.el.remove(); state.cards.delete(card.id); }, CONFIG.closeDelay);
+}
+
+/** Error del jugador: resta tiempo, rompe el combo y sacude la tarjeta. */
+function penalize(card) {
+  sfx.bad();
+  card.remaining -= CONFIG.penaltyMs;
+  state.combo = 0;
+  updateHud();
+  card.el.classList.remove('shake');
+  void card.el.offsetWidth;              // fuerza reinicio de la animación
+  card.el.classList.add('shake');
+}
+
+/** Acierto: puntaje según tiempo restante y combo. */
+function solveCard(card) {
+  const ratio = Math.max(card.remaining / card.duration, 0);
+  const points = Math.round((100 + 100 * ratio) * (1 + state.combo * 0.25) * (card.golden ? CONFIG.goldenFactor : 1));
+  const prevLevel = state.level;
+
+  state.score += points;
+  state.combo = Math.min(state.combo + 1, CONFIG.maxCombo);
+  state.maxCombo = Math.max(state.maxCombo, state.combo);
+  state.solved++;
+  state.level = 1 + Math.floor(state.solved / CONFIG.solvesPerLevel);
+
+  // Recompensas dinámicas: subir de nivel o mantener un combo alto devuelve una vida
+  if (state.level > prevLevel) { banner('Nivel ' + state.level); sfx.up(); }
+  else if (state.combo === CONFIG.lifeAtCombo && state.lives < CONFIG.startLives) { state.lives++; banner('+1 vida'); sfx.up(); }
+  else sfx.ok();
+
+  const line = card.lines[card.snippet.bug];
+  line.className = 'line ok';
+  highlight(line.querySelector('code'), card.snippet.fix);
+
+  card.status.textContent = 'Corregido';
+  card.el.appendChild(el('span', 'pop', '+' + points));
+  burst(card);
+  finishCard(card, 'solved');
+  updateHud();
+}
+
+/** Se acabó el tiempo: se pierde una vida y se revela el error. */
+function expireCard(card) {
+  card.lines[card.snippet.bug].className = 'line bug';
+  setChip(card);
+  state.lives--;
+  state.combo = 0;
+  sfx.hit();
+  finishCard(card, 'failed');
+  updateHud();
+
+  dom.flash.classList.remove('on');
+  void dom.flash.offsetWidth;
+  dom.flash.classList.add('on');
+
+  if (state.lives <= 0) {
+    state.running = false;
+    setTimeout(showGameOver, 1100);
+  }
+}
+
+/* ==========================================================================
+   9. EVENTOS
+   Delegación: un único listener atiende a todas las tarjetas.
+   ========================================================================== */
+dom.field.addEventListener('click', (e) => {
+  const cardEl = e.target.closest('.card');
+  if (!cardEl || !state.running || state.paused) return;
+  const card = state.cards.get(Number(cardEl.dataset.id));
+  if (!card || card.stage === 'done') return;
+
+  const lineBtn = e.target.closest('.line');
+  const fixBtn = e.target.closest('.fix');
+
+  // Fase 1: identificar la línea con el error
+  if (lineBtn && card.stage === 'find') {
+    if (Number(lineBtn.dataset.index) === card.snippet.bug) {
+      lineBtn.classList.add('picked');
+      card.lines.forEach((b) => (b.disabled = true));
+      card.stage = 'fix';
+      setChip(card);
+      showFixes(card);
+    } else {
+      lineBtn.classList.add('wrong');
+      lineBtn.disabled = true;
+      penalize(card);
+    }
+    return;
+  }
+
+  // Fase 2: elegir la corrección
+  if (fixBtn && card.stage === 'fix') {
+    if (fixBtn.dataset.ok) {
+      solveCard(card);
+    } else {
+      fixBtn.classList.add('wrong');
+      fixBtn.disabled = true;
+      penalize(card);
+    }
+  }
+});
+
+/* ==========================================================================
+   10. PANTALLAS DE INICIO Y FIN
+   ========================================================================== */
+function showPanel(nodes, buttonText, onClick = startGame) {
+  const btn = el('button', 'btn', buttonText);
+  btn.type = 'button';
+  btn.addEventListener('click', onClick);
+  dom.panel.replaceChildren(...nodes, btn);
+  dom.overlay.hidden = false;
+  btn.focus();
+}
+
+/** Campo de nombre: se reutiliza en la pantalla de inicio y en la de fin. */
+const nameInput = Object.assign(el('input', 'name'), { maxLength: 14, placeholder: 'Tu nombre', value: profile.get() });
+nameInput.setAttribute('aria-label', 'Tu nombre');
+
+/** Tabla de posiciones; `mark` resalta la fila de la partida recién terminada. */
+function renderBoard(list, mark = -1) {
+  const ol = el('ol', 'board');
+  if (!list.length) ol.appendChild(el('li', 'empty', 'Aún no hay puntajes. Sé el primero.'));
+  list.forEach((e, i) => {
+    const li = el('li', i === mark ? 'me' : '');
+    li.append(el('span', 'pos', i + 1), el('span', '', e.name), el('b', '', e.score));
+    ol.appendChild(li);
+  });
+  return ol;
+}
+
+function showStart() {
+  const legend = el('div', 'legend');
+  legend.append(el('span', 'chip sintaxis', 'Error de sintaxis'), el('span', 'chip logica', 'Error de lógica'));
+  showPanel([
+    el('div', 'logo', '{ }'),
+    el('h1', '', 'Cazabugs'),
+    el('p', '', 'Encuentra la línea con el error y elige su corrección antes de que se acabe el tiempo. Cada fallo te cuesta segundos y rompe tu combo.'),
+    legend,
+    nameInput,
+    renderBoard(board.get())
+  ], 'Jugar');
+}
+
+function showGameOver() {
+  const record = state.score > state.best;
+  if (record) { state.best = state.score; storage.set(state.best); }
+
+  const stat = (value, label) => { const d = el('div'); d.append(el('b', '', value), el('span', '', label)); return d; };
+  const summary = el('div', 'summary');
+  summary.append(stat(state.solved, 'Corregidos'), stat(state.level, 'Nivel'), stat('x' + (1 + state.maxCombo * 0.25), 'Mejor combo'));
+
+  // Guarda la partida en la tabla de posiciones
+  const saved = state.score > 0
+    ? board.add({ name: state.player, score: state.score, solved: state.solved })
+    : { list: board.get(), index: -1 };
+
+  showPanel([
+    el('div', 'score-big', String(state.score)),
+    el('p', '', record ? 'Nuevo récord' : 'Récord: ' + state.best),
+    summary,
+    renderBoard(saved.list, saved.index),
+    nameInput
+  ], 'Jugar de nuevo');
+}
+
+function startGame() {
+  state.player = nameInput.value.trim().slice(0, 14) || 'Jugador';
+  profile.set(state.player);
+  Object.assign(state, {
+    running: true, paused: false, score: 0, lives: CONFIG.startLives, level: 1,
+    solved: 0, combo: 0, maxCombo: 0, spawnIn: 500, deck: [], lastTs: performance.now()
+  });
+  state.cards.clear();
+  dom.slots.forEach((s) => s.replaceChildren());
+  dom.overlay.hidden = true;
+  updateHud();
+  requestAnimationFrame(frame);
+}
+
+/* ==========================================================================
+   11. EXTRAS DE JUGABILIDAD (pausa, teclado, avisos y partículas)
+   ========================================================================== */
+
+/** Aviso animado en el centro de la pantalla (nivel nuevo, vida extra). */
+function banner(text) {
+  dom.banner.textContent = text;
+  dom.banner.classList.remove('on');
+  void dom.banner.offsetWidth;
+  dom.banner.classList.add('on');
+}
+
+/** Ráfaga de partículas al corregir; se limpian solas al terminar su animación. */
+function burst(card) {
+  for (let i = 0; i < 10; i++) {
+    const spark = el('i', 'spark');
+    const angle = (i / 10) * Math.PI * 2;
+    spark.style.setProperty('--dx', Math.cos(angle) * 60 + 'px');
+    spark.style.setProperty('--dy', Math.sin(angle) * 40 + 'px');
+    spark.addEventListener('animationend', () => spark.remove());
+    card.el.appendChild(spark);
+  }
+}
+
+/** Pausa y reanudación; al volver se reinicia lastTs para no perder tiempo. */
+function setPaused(paused) {
+  if (!state.running || state.paused === paused) return;
+  state.paused = paused;
+  if (paused) {
+    showPanel([el('h1', '', 'Pausa'), el('p', '', 'El tiempo está detenido.')], 'Continuar', () => setPaused(false));
+  } else {
+    dom.overlay.hidden = true;
+    state.lastTs = performance.now();
+    requestAnimationFrame(frame);
+  }
+}
+
+dom.pauseBtn.addEventListener('click', () => setPaused(!state.paused));
+dom.soundBtn.addEventListener('click', () => { dom.soundBtn.textContent = sfx.toggle() ? 'Sonido: no' : 'Sonido: sí'; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+
+/** Teclado: Esc/P pausan; 1-3 eligen la corrección de la tarjeta más urgente. */
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape' || e.key.toLowerCase() === 'p') { setPaused(!state.paused); return; }
+  if (!state.running || state.paused) return;
+  const n = Number(e.key);
+  if (n >= 1 && n <= 3) {
+    const target = [...state.cards.values()].filter((c) => c.stage === 'fix').sort((a, b) => a.remaining - b.remaining)[0];
+    if (target) target.fixes.querySelectorAll('.fix')[n - 1]?.click();
+  }
+});
+
+/* ==========================================================================
+   12. INICIALIZACIÓN
+   ========================================================================== */
+(function init() {
+  for (let i = 0; i < CONFIG.slots; i++) {
+    const slot = el('div');
+    dom.field.appendChild(slot);
+    dom.slots.push(slot);
+  }
+  for (let i = 0; i < CONFIG.startLives; i++) dom.lives.appendChild(el('span', 'life'));
+  updateHud();
+  showStart();
+})();
+</script>
+</body>
+</html>
